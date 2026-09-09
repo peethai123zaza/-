@@ -4,7 +4,8 @@ from pypdf import PdfReader
 import os
 import json
 
-API_KEY = "AQ.Ab8RN6Kjm1ZVOumjAx9nBVsoDKGJZP9VgmVzzs2FlfvzRx0lXA"
+# ดึง Key จาก Streamlit Secrets
+API_KEY = st.secrets["AQ.Ab8RN6Kjm1ZVOumjAx9nBVsoDKGJZP9VgmVzzs2FlfvzRx0lXA"]
 genai.configure(api_key=API_KEY)
 
 st.title("📝 ระบบฝึกทำข้อสอบอัจฉริยะ")
