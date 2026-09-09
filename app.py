@@ -5,7 +5,7 @@ import os
 import json
 
 # ดึง Key จาก Streamlit Secrets
-API_KEY = st.secrets["AQ.Ab8RN6Kjm1ZVOumjAx9nBVsoDKGJZP9VgmVzzs2FlfvzRx0lXA"]
+API_KEY = st.secrets["GOOGLE_API_KEY"]
 genai.configure(api_key=API_KEY)
 
 st.title("📝 ระบบฝึกทำข้อสอบอัจฉริยะ")
