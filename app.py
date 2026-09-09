@@ -1,20 +1,24 @@
 import streamlit as st
-import google.generativeai as genai
+import requests
+import json
 from pypdf import PdfReader
 import os
-import json
+import time
 
-# ดึง Key จาก Streamlit Secrets
-API_KEY = st.secrets["GOOGLE_API_KEY"]
-genai.configure(api_key=API_KEY)
+# ดึง Key จาก Streamlit Secrets โดยตรง
+try:
+    API_KEY = st.secrets["GOOGLE_API_KEY"]
+except:
+    API_KEY = "AQ.Ab8RN6Kjm1ZVOumjAx9nBVsoDKGJZP9VgmVzzs2FlfvzRx0lXA"
 
-st.title("📝 ระบบฝึกทำข้อสอบอัจฉริยะ")
+MODEL_NAME = "gemini-3.6-flash"
+
+st.title("📝 ระบบฝึกทำข้อสอบอัจฉริยะ (Cloud OAuth Fix)")
 
 exam_type = st.selectbox("เลือกประเภทข้อสอบที่ต้องการฝึก:", ["ปรนัย 4 ตัวเลือก", "ข้อเขียน (แบบสั้น)"])
 
 col1, col2 = st.columns(2)
 with col1:
-    # ช่องพิมพ์ระบุจำนวนข้อ จำกัดไม่เกิน 60 ข้อ
     num_questions = st.number_input("จำนวนข้อสอบ (สูงสุด 60 ข้อ):", min_value=1, max_value=60, value=5, step=1)
 with col2:
     difficulty = st.selectbox("ระดับความยาก:", ["ง่าย (Easy)", "ปานกลาง (Medium)", "ยาก (Hard)"])
@@ -28,7 +32,7 @@ if "submitted" not in st.session_state:
 
 if uploaded_file is not None:
     if st.button("สร้างข้อสอบ"):
-        st.session_state.submitted = False  # รีเซ็ตสถานะการส่งเมื่อสร้างชุดใหม่
+        st.session_state.submitted = False
         with st.spinner(f'กำลังสร้างข้อสอบ {num_questions} ข้อ ระดับ {difficulty}...'):
             temp_path = "temp.pdf"
             with open(temp_path, "wb") as f:
@@ -37,13 +41,8 @@ if uploaded_file is not None:
                 reader = PdfReader(temp_path)
                 file_content = "".join([page.extract_text() for page in reader.pages if page.extract_text()])
                 
-                model = genai.GenerativeModel(
-                    model_name="gemini-3.6-flash",
-                    generation_config={"response_mime_type": "application/json"}
-                )
-                
                 if exam_type == "ปรนัย 4 ตัวเลือก":
-                    prompt = f"""จากเนื้อหานี้:\n{file_content[:20000]}\nจงสร้างข้อสอบปรนัยจำนวน {num_questions} ข้อ ในระดับความยาก '{difficulty}' คืนค่าเป็น JSON รูปแบบนี้เท่านั้น:
+                    prompt_text = f"""จากเนื้อหานี้:\n{file_content[:20000]}\nจงสร้างข้อสอบปรนัยจำนวน {num_questions} ข้อ ในระดับความยาก '{difficulty}' คืนค่าเป็น JSON รูปแบบนี้เท่านั้น:
                     {{
                       "questions": [
                         {{
@@ -55,7 +54,7 @@ if uploaded_file is not None:
                       ]
                     }}"""
                 else:
-                    prompt = f"""จากเนื้อหานี้:\n{file_content[:20000]}\nจงสร้างข้อสอบอัตนัย (ข้อเขียนแบบสั้น) จำนวน {num_questions} ข้อ ในระดับความยาก '{difficulty}' คืนค่าเป็น JSON รูปแบบนี้เท่านั้น:
+                    prompt_text = f"""จากเนื้อหานี้:\n{file_content[:20000]}\nจงสร้างข้อสอบอัตนัย (ข้อเขียนแบบสั้น) จำนวน {num_questions} ข้อ ในระดับความยาก '{difficulty}' คืนค่าเป็น JSON รูปแบบนี้เท่านั้น:
                     {{
                       "questions": [
                         {{
@@ -65,10 +64,35 @@ if uploaded_file is not None:
                         }}
                       ]
                     }}"""
+
+                # ใช้ REST API พร้อมส่งคีย์ AQ ผ่าน Authorization Bearer Header โดยตรง
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {API_KEY}"
+                }
+                payload = {
+                    "contents": [{"parts": [{"text": prompt_text}]}],
+                    "generationConfig": {"response_mime_type": "application/json"}
+                }
                 
-                response = model.generate_content(prompt)
-                st.session_state.exam_data = json.loads(response.text)
+                success = False
+                result_json = None
+                for attempt in range(3):
+                    response = requests.post(url, headers=headers, data=json.dumps(payload))
+                    result_json = response.json()
+                    if response.status_code == 200:
+                        success = True
+                        break
+                    else:
+                        time.sleep(2)
                 
+                if success:
+                    raw_text = result_json["candidates"][0]["content"]["parts"][0]["text"]
+                    st.session_state.exam_data = json.loads(raw_text)
+                else:
+                    st.error(f"Google API Error: {result_json}")
+                    
             except Exception as e:
                 st.error(f"Error: {e}")
             finally:
@@ -92,11 +116,9 @@ if st.session_state.exam_data is not None:
 
     st.divider()
     
-    # ปุ่ม Submit ส่งคำตอบ
     if st.button("Submit (ส่งคำตอบและตรวจคะแนน)"):
         st.session_state.submitted = True
 
-    # แสดงผลลัพธ์และสรุปคะแนนเมื่อกด Submit
     if st.session_state.submitted:
         st.header("📊 สรุปผลคะแนนของคุณ")
         
